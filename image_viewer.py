@@ -50,12 +50,14 @@ ENABLE_PAGE_VERTICAL_EXPANSION = True
 # ==============================================================================
 # SKEWNESS CONFIGURATION
 # ==============================================================================
-# Controls how strongly the trapezoid width narrows with tilt (higher = more skew):
-#   0.25 : Previous subtle skew
-#   0.35 : Moderate perspective
-#   0.45 : Strong perspective (Increased skew)
-#   0.60 : Heavy dramatic skew
-SKEW_FACTOR = 0.25
+# Dynamic skew scaling following (1 - sin(theta)):
+# Starts gentle at SKEW_MIN around 90°, accelerating to SKEW_MAX as the lid folds toward 0°.
+#   SKEW_MIN = 0.25 : Subtle baseline perspective near upright typing angles
+#   SKEW_MAX = 0.45 : Deep iPhone Duo fold perspective at sharp angles (try 0.45 - 0.55)
+SKEW_MIN = 0.25
+SKEW_MAX = 0.90
+SKEW_FACTOR = SKEW_MAX  # Backward compatibility reference
+
 
 
 def parse_resolution(val, canvas_w=None):
@@ -364,13 +366,15 @@ class LidImageViewer:
         xc = canvas_w / 2.0
 
         if clamped_angle <= 90.0:
+            rad = math.radians(clamped_angle)
+            t_drop = 1.0 - math.sin(rad)  # 0.0 at 90°, accelerates as lid closes
+
             if ENABLE_PAGE_VERTICAL_EXPANSION:
                 # Upright Standing Page Projection:
                 # As screen tilts forward, physical screen top drops by 1 - sin(theta).
                 # Bottom stays anchored at screen bottom (y=canvas_h).
                 # Height increases upward (y_top = -drop), with top cropped off-screen.
-                rad = math.radians(clamped_angle)
-                drop = canvas_h * (1.0 - math.sin(rad))
+                drop = canvas_h * t_drop
                 y_top = -drop
                 y_bottom = canvas_h
             else:
@@ -378,17 +382,20 @@ class LidImageViewer:
                 y_top = 0
 
             # Angle decreased (< 90°):
-            # Top width shrinks inward with SKEW_FACTOR
-            delta = (90.0 - clamped_angle) / 80.0
-            top_w = base_w * max(0.18, 1.0 - SKEW_FACTOR * delta)
+            # Dynamic skewness linked to (1 - sin(theta)):
+            # Starts at SKEW_MIN (0.25) near 90° and smoothly accelerates to SKEW_MAX (0.45-0.55) as screen folds
+            current_skew = SKEW_MIN + (SKEW_MAX - SKEW_MIN) * t_drop
+            top_w = base_w * max(0.18, 1.0 - current_skew * t_drop)
             bot_w = base_w
         else:
-            # Angle increased (> 90°): only for < 90°
+            # Angle increased (> 90°): only for < 90° vertical expansion
             y_bottom = canvas_h
             y_top = 0
-            # Bottom width shrinks inward with SKEW_FACTOR
-            delta = (clamped_angle - 90.0) / 80.0
-            bot_w = base_w * max(0.18, 1.0 - SKEW_FACTOR * delta)
+            # Bottom width shrinks inward symmetrically
+            rad = math.radians(clamped_angle)
+            t_tilt = 1.0 - math.sin(rad)
+            current_skew = SKEW_MIN + (SKEW_MAX - SKEW_MIN) * t_tilt
+            bot_w = base_w * max(0.18, 1.0 - current_skew * t_tilt)
             top_w = base_w
 
         tl = (xc - top_w / 2.0, y_top)
